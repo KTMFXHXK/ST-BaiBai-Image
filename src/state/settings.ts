@@ -5,6 +5,7 @@ import {
   type ComfySimpleConfig,
 } from '@/backends/comfyTemplates';
 import { BUILTIN_NAI_ARTISTS, isBuiltinNaiArtist, naiDefaultUndesired } from '@/backends/nai';
+import { captureNaiParameters, normalizeNaiParameterPresets, type NaiParameterPreset } from '@/backends/naiParameterPresets';
 import {
   normalizeOrientationLock,
   parseSize,
@@ -242,6 +243,9 @@ export interface NaiEndpoint {
 
 /** NAI 连接与出图参数。接入点(地址+密钥)可存多条,见 endpoints。 */
 export interface NaiSettings extends BackendConn {
+  /** 独立的默认参数方案库；手动编辑不会自动覆盖已保存方案。 */
+  parameterPresets: NaiParameterPreset[];
+  activeParameterPresetId: string;
   /**
    * 接入点列表。**不变式:恒非空,且必含内置官方那条**(normalize 缺则补回列表首位)。
    * 官方条不可删,故 UI 不必处理「删空了怎么办」——与 ComfyUI 工作流库的恒非空同构,
@@ -1134,6 +1138,8 @@ export function newNaiEndpoint(name = '新接入点'): NaiEndpoint {
 
 function naiDefaults(): NaiSettings {
   return {
+    parameterPresets: [],
+    activeParameterPresetId: '',
     ...backendDefaults(NAI_OFFICIAL_URL),
     resolution: '832×1216',
     // 新装即带内置官方那条并选中它:地址是必需品,空列表会让「测试连接」无处可点
@@ -1643,8 +1649,10 @@ function normalizeNai(raw: unknown, def: NaiSettings): NaiSettings {
       ? o.activeArtistId
       : '';
 
-  return {
+  const normalized: NaiSettings = {
     ...conn,
+    parameterPresets: [],
+    activeParameterPresetId: '',
     // 「附加负面」已并入 undesiredContent 一个框,存量值折进去(见 foldLegacyNegative)
     negativePrompt: '',
     // 接入点:存量 url/key 收成第一条;恒非空且必含官方条(见 migrateNaiEndpoints)。
@@ -1679,6 +1687,13 @@ function normalizeNai(raw: unknown, def: NaiSettings): NaiSettings {
     naturalLanguage: typeof o.naturalLanguage === 'boolean' ? o.naturalLanguage : def.naturalLanguage,
     orientationLock: normalizeOrientationLock(o.orientationLock),
   };
+  normalized.parameterPresets = normalizeNaiParameterPresets(
+    o.parameterPresets, captureNaiParameters(normalized), [...NAI_MODEL_VALUES],
+  );
+  normalized.activeParameterPresetId = normalized.parameterPresets.some(p => p.id === o.activeParameterPresetId)
+    ? o.activeParameterPresetId! : '';
+  // 载入时保留实际参数（包括未覆盖保存的调整），仅由用户切换方案时应用快照。
+  return normalized;
 }
 
 /**

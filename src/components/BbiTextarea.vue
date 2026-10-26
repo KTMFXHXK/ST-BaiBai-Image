@@ -146,6 +146,8 @@ defineOptions({ inheritAttrs: false });
 <style scoped>
 .bbi-textarea {
   width: 100%;
+  /* 保留按行数测得的编辑高度，不让弹窗里的长辅助内容把输入框压扁。 */
+  flex-shrink: 0;
   padding: 8px 10px;
   border: 1px solid var(--bbi-line-strong);
   border-radius: var(--bbi-radius-sm);

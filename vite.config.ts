@@ -30,6 +30,20 @@ export default defineConfig(({ mode }) => ({
   },
 
   plugins: [
+    {
+      // 仅测试期生效:vitest 默认把 .vue 当 SSR 模块转译,plugin-vue 于是只产出
+      // `ssrRender`(客户端渲染器会报「missing template or render function」),
+      // 而且会给每个 SFC 套一层 `useSSRContext()` 包装(node 环境没有 SSR 上下文,
+      // 挂载直接抛错)。这里把该次转译的 ssr 标记翻成 false,让组件按浏览器路径编译。
+      // 生产构建的 ssr 本来就是 false,因此对 dist 产物零影响。
+      name: 'bbi-test-client-vue',
+      enforce: 'pre',
+      transform(_code, id, options) {
+        if (!process.env.VITEST) return null;
+        if (id.endsWith('.vue') && options?.ssr) options.ssr = false;
+        return null;
+      },
+    },
     vue(),
     {
       name: 'sillytavern-resolver',

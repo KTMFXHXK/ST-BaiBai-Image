@@ -6,6 +6,7 @@ import type { Orientation } from '@/backends/size';
 import BbiTextarea from '@/components/BbiTextarea.vue';
 import Icon from '@/components/Icon.vue';
 import ModalMask from '@/components/ModalMask.vue';
+import PromptAssist from '@/components/PromptAssist.vue';
 import { activeOrientationLock } from '@/state/settings';
 import { containsTagMarkup, type ImageTagContent } from '@/st/imageTagRegex';
 
@@ -292,6 +293,8 @@ onBeforeUnmount(() => {
           mono
           placeholder="1girl, long black hair, school uniform, classroom"
         />
+        <!-- 中文对照 + 查词插入:只读辅助,不参与保存,也不进生图请求 -->
+        <PromptAssist :text="tag" kind="tag" label="画面 tag" default-open @insert="tag = $event" />
       </div>
 
       <div class="bbi-modal-field">
@@ -303,6 +306,7 @@ onBeforeUnmount(() => {
           :max-rows="10"
           placeholder="A girl standing by the classroom window at sunset."
         />
+        <PromptAssist :text="nl" kind="nl" label="自然语言" @insert="nl = $event" />
       </div>
 
       <div class="bbi-modal-field">
@@ -315,6 +319,7 @@ onBeforeUnmount(() => {
           mono
           placeholder="extra people, duplicate"
         />
+        <PromptAssist :text="negative" kind="tag" label="负面提示词" @insert="negative = $event" />
       </div>
 
       <div class="bbi-modal-field">
@@ -353,33 +358,50 @@ onBeforeUnmount(() => {
         <span class="bbi-modal-label">
           角色提示词(多角色;仅 NAI 后端发送)
         </span>
-        <div v-for="(character, index) in characters" :key="index" class="bbi-char-row">
-          <input
-            v-model="character.name"
-            class="bbi-input bbi-char-name"
-            type="text"
-            placeholder="角色名"
+        <div v-for="(character, index) in characters" :key="index" class="bbi-char-block">
+          <div class="bbi-char-row">
+            <input
+              v-model="character.name"
+              class="bbi-input bbi-char-name"
+              type="text"
+              placeholder="角色名"
+            />
+            <input
+              v-model="character.tag"
+              class="bbi-input bbi-char-tag"
+              type="text"
+              placeholder="tag(如 girl, black hair)"
+            />
+            <input
+              v-model="character.nl"
+              class="bbi-input bbi-char-nl"
+              type="text"
+              placeholder="自然语言(可空)"
+            />
+            <button
+              class="bbi-icon-mini"
+              type="button"
+              title="删除这个角色"
+              @click="removeCharacter(index)"
+            >
+              <Icon name="trash" />
+            </button>
+          </div>
+          <!-- 每个角色各自一份辅助面板:状态互不影响,文本一变旧译文立刻作废 -->
+          <PromptAssist
+            :text="character.tag"
+            kind="tag"
+            compact
+            label="角色 tag"
+            @insert="character.tag = $event"
           />
-          <input
-            v-model="character.tag"
-            class="bbi-input bbi-char-tag"
-            type="text"
-            placeholder="tag(如 girl, black hair)"
+          <PromptAssist
+            :text="character.nl"
+            kind="nl"
+            compact
+            label="角色自然语言"
+            @insert="character.nl = $event"
           />
-          <input
-            v-model="character.nl"
-            class="bbi-input bbi-char-nl"
-            type="text"
-            placeholder="自然语言(可空)"
-          />
-          <button
-            class="bbi-icon-mini"
-            type="button"
-            title="删除这个角色"
-            @click="removeCharacter(index)"
-          >
-            <Icon name="trash" />
-          </button>
         </div>
         <button class="bbi-btn bbi-btn-sm bbi-char-add" type="button" @click="addCharacter">
           <Icon name="plus" /> 添加角色
@@ -455,6 +477,12 @@ onBeforeUnmount(() => {
 }
 
 /* —— 角色行:名字窄、tag 与自然语言各占一半,删除钮跟在末尾 —— */
+.bbi-char-block {
+  margin-top: 6px;
+}
+.bbi-char-block > .bbi-char-row {
+  margin-top: 0;
+}
 .bbi-char-row {
   display: flex;
   gap: 6px;

@@ -24,6 +24,8 @@ import { strToU8, zipSync } from 'fflate';
 
 function nai(overrides: Partial<NaiSettings> = {}): NaiSettings {
   return {
+    parameterPresets: [],
+    activeParameterPresetId: '',
     url: 'https://image.novelai.net',
     qualityTags: '',
     negativePrompt: '',

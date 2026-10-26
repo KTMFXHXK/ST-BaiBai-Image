@@ -34,6 +34,7 @@ import {
   vibeMetaFromData,
 } from '@/backends/vibeStore';
 import NaiArtistManager from '@/pages/backend/panels/NaiArtistManager.vue';
+import NaiParameterPresets from '@/pages/backend/panels/NaiParameterPresets.vue';
 import { acquireNaiSlot } from '@/floor/genQueue';
 import { makeJpegThumbnail } from '@/st/imageFile';
 import { deleteUserImage } from '@/st/images';
@@ -53,6 +54,7 @@ import BbiTextarea from '@/components/BbiTextarea.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import Icon from '@/components/Icon.vue';
 import ModalMask from '@/components/ModalMask.vue';
+import PromptAssist from '@/components/PromptAssist.vue';
 import { getContext } from '@/st/context';
 import {
   activeNaiArtist,
@@ -206,6 +208,12 @@ const hasArtist = computed(() => artist.value !== null);
 const isBuiltinArtist = computed(() =>
   artist.value ? isBuiltinNaiArtist(artist.value.id) : false,
 );
+
+/** 中文辅助面板点「插入」:payload 已是追加好的整串,直接写回当前画师串。
+ *  内置配方是模块常量,写进去会污染所有用户共享的这份配方——只读不写。 */
+function insertArtistPrompt(payload: string) {
+  if (artist.value && !isBuiltinArtist.value) artist.value.prompt = payload;
+}
 
 /** 改名是低频操作:平时只显示下拉,点「改名」才把选择器原地换成输入框。 */
 const renamingArtist = ref(false);
@@ -444,6 +452,13 @@ function saveNaiPrompt() {
 function resetNaiPromptDraft() {
   const target = editingNaiPrompt.value;
   if (target) naiPromptDraft.value = target.fallback();
+}
+
+/** 中文辅助面板点「插入」:payload 已是追加好的整串,只改草稿;保存仍走下方「完成」。
+ *  只读目标(内置配方的绑定位)是纯查看,草稿不接写入。 */
+function insertNaiPromptDraft(payload: string) {
+  if (editingNaiPrompt.value?.readonly) return;
+  naiPromptDraft.value = payload;
 }
 
 /* ============ Vibe 库 ============ */
@@ -1046,6 +1061,15 @@ async function removeVibe(vibe: NaiVibe) {
             :readonly="isBuiltinArtist"
             placeholder="artist:xxx, artist:yyy"
           />
+          <!-- 中文辅助:只读对照当前这串;点「插入」才把查到的英文标签追加到末尾 -->
+          <PromptAssist
+            :text="artist.prompt"
+            kind="tag"
+            label="画师串"
+            default-open
+            :can-insert="!isBuiltinArtist"
+            @insert="insertArtistPrompt"
+          />
           <p v-if="isBuiltinArtist" class="bbi-field-hint art-hint">
             内置画师串随插件版本更新,不可直接改;点上方复制按钮建一条自己的再改。
           </p>
@@ -1095,6 +1119,7 @@ async function removeVibe(vibe: NaiVibe) {
       </Collapsible>
 
       <Collapsible title="默认参数" :open="false">
+        <NaiParameterPresets />
         <!-- 语义配对紧凑行:双字段行两列、数字参数行四列;说明统一收进行下的一行 hint -->
         <div class="bbi-field">
           <div class="bbi-field-head">
@@ -1662,6 +1687,16 @@ async function removeVibe(vibe: NaiVibe) {
           :max-rows="28"
           mono
           :readonly="editingNaiPrompt.readonly"
+        />
+        <!-- 中文辅助:正/负两个字段共用这一个弹窗与 naiPromptDraft,故只挂一处;
+             点「插入」只改草稿,保存仍走下方原有「完成」 -->
+        <PromptAssist
+          :text="naiPromptDraft"
+          kind="tag"
+          :label="editingNaiPrompt.label"
+          default-open
+          :can-insert="!editingNaiPrompt.readonly"
+          @insert="insertNaiPromptDraft"
         />
 
         <footer class="bbi-modal-foot">
