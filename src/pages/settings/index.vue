@@ -82,6 +82,14 @@ const imageDisplaySel = computed<string>({
   get: () => settings.ui.imageDisplaySize,
   set: v => (settings.ui.imageDisplaySize = v as ImageDisplaySize),
 });
+const imagePlacementSel = computed<string>({
+  get: () => settings.ui.imagePlacement,
+  set: v => (settings.ui.imagePlacement = v === 'bottom' ? 'bottom' : 'inline'),
+});
+const imagePlacementOptions = [
+  { value: 'inline', label: '场景后插入（默认）' },
+  { value: 'bottom', label: '回复底部（美化兼容）' },
+];
 const IMAGE_DISPLAY_OPTIONS = IMAGE_DISPLAY_SIZES.map(o => ({ value: o.value, label: o.label }));
 
 // 副 API「生成 tag 使用」:空串 = 跟随主 API,其余为渠道 id。
@@ -577,6 +585,15 @@ async function confirmUpdate() {
         </label>
         <p class="bbi-field-hint">
           体积约为 PNG 的一到两成;代价是图片不再内嵌生成参数(提示词与种子仍留在聊天记录里)。
+        </p>
+
+        <div class="bbi-select-row">
+          <span class="bbi-field-label">图片插入位置</span>
+          <BbiSelect v-model="imagePlacementSel" :options="imagePlacementOptions" aria-label="图片插入位置" />
+        </div>
+        <p class="bbi-field-hint">
+          底部模式将新提示词保存在消息附加数据中，图片显示在正文外侧，适合带美化的角色卡。
+          不自动改写旧消息；旧消息可在该楼的「⋯」菜单点击「插图移至底部」。
         </p>
 
         <label class="bbi-switch-row">

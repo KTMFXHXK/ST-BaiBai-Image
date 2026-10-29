@@ -76,7 +76,7 @@ function isSameMessage(message: STMessage, expected: STMessage): boolean {
 }
 
 /**
- * 以 compare-and-swap 方式修改消息正文和一个 extra 键。
+ * 以 compare-and-swap 方式修改消息正文及 extra 键。槽位与角色增量可在同次保存中提交。
  *
  * 身份检查(聊天 / 消息 / swipe)一致才落盘;正文内容本身**不**参与比对——正文由
  * buildNext 基于「落盘那一刻的真实正文」现算,别的插件在分析期间做的修改因此得以保留，
@@ -85,11 +85,11 @@ function isSameMessage(message: STMessage, expected: STMessage): boolean {
  */
 export async function applyMessageText(
   floor: number,
-  buildNext: (currentText: string) => string | null,
+  buildNext: (currentText: string, message: STMessage) => string | null,
   expectedChatId: string,
   expectedSwipeId: number | null,
   expectedMessage?: STMessage,
-  extraUpdate?: MessageExtraUpdate,
+  extraUpdate?: MessageExtraUpdate | ((message: STMessage) => MessageExtraUpdate[] | null),
 ): Promise<ApplyMessageResult> {
   const context = getContext();
   if (!context?.saveChat) return 'unavailable';
@@ -101,18 +101,22 @@ export async function applyMessageText(
   if (currentSwipeId(message) !== expectedSwipeId) return 'swipe-changed';
 
   // 编辑框开着时它才是正文的活口径(用户改了还没确认),落盘基底以它为准
-  const nextText = buildNext(activeEditorText(floor) ?? message.mes);
+  const nextText = buildNext(activeEditorText(floor) ?? message.mes, message);
   if (nextText === null) return 'build-failed';
+  const updates = typeof extraUpdate === 'function' ? extraUpdate(message) : extraUpdate ? [extraUpdate] : [];
+  if (updates === null) return 'build-failed';
 
   const previousText = message.mes;
   const previousExtra = message.extra;
   const swipeId = currentSwipeId(message);
   const previousSwipeText = swipeId !== null ? message.swipes?.[swipeId] : undefined;
   setMessageText(message, nextText);
-  if (extraUpdate) {
+  if (updates.length) {
     const nextExtra = { ...(message.extra ?? {}) };
-    if (extraUpdate.value === undefined) delete nextExtra[extraUpdate.key];
-    else nextExtra[extraUpdate.key] = extraUpdate.value;
+    for (const update of updates) {
+      if (update.value === undefined) delete nextExtra[update.key];
+      else nextExtra[update.key] = update.value;
+    }
     message.extra = nextExtra;
   }
 

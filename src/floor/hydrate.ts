@@ -1,6 +1,8 @@
 import { h, render, watch, type VNode } from 'vue';
 
 import Card from '@/floor/Card.vue';
+import { bottomAnchors } from '@/floor/bottomHost';
+import { detachedImageTags, messageImageTags } from '@/st/imageSlots';
 import { clearAutoGenerateFlags } from '@/floor/autoGenerate';
 import { cardStyleSheet, cardStyleTextFallback } from '@/floor/cardStyles';
 import { onChatMutation } from '@/floor/chatObserver';
@@ -35,13 +37,12 @@ import { settings } from '@/state/settings';
  * 把它连同 shadow root 一起删掉,而事件层对此完全无感。用户报的
  * 「图在生成、楼层里看不到界面」就是它——genState 是模块级的,卡片死了生成照样跑完。
  *
- * 相邻的柏宝书没这个毛病,不是因为它更结实,是因为它的宿主挂在 .mes_text **外面**
- * 当兄弟节点,`.html()`/`.empty()` 只清 innerHTML,碰不到兄弟。而本插件的卡片必须
- * 落在 tag 的行内位置(多 tag 楼层要按位置分别成图),搬不出去——同一条约束下
- * 当初也否掉了官方 extra.media 方案(architecture.md §6)。故自愈是位置约束下的唯一解。
+ * 行内模式保留上述锚点与自愈机制。底部模式从 message.extra 读取槽位，
+ * 通过 bottomAnchors 将卡片挂在 .mes_text 的兄弟区域，不依赖正文占位节点。
  */
 
 export const slotRegistry = new SlotRegistry();
+let hydrationRevision = 0;
 
 let bound = false;
 let healingBound = false;
@@ -134,17 +135,20 @@ export function hydrateMessage(messageId: number, ctx: STContext): void {
   const desired = new Map<string, { anchor: HTMLElement; vnode: VNode }>();
 
   if (message) {
-    const tags = parseImageTags(message.mes);
+    const tags = messageImageTags(message);
+    const bottom = detachedImageTags(message) !== null;
+    const mesText = findMesText(messageId);
+    if (mesText) bottomAnchors(mesText, bottom ? tags.length : 0);
     const swipeId = message.swipe_id ?? 0;
     // 槽位可能整个消失(用户删掉 tag / swipe 到 tag 更少的一版):那些槽位再没有卡片
     // 来对账,运行态记录会永久留存,日后同 key 复现时被新卡片误认领。按 tag 数剪掉越界的。
     pruneGenSlots(chatId ?? '-', messageId, swipeId, tags.length);
 
     if (tags.length > 0) {
-      const mesText = findMesText(messageId);
       // 楼层不在 DOM(未渲染/群聊懒渲染):desired 留空,本楼旧记录被卸载,等下次渲染事件
       if (mesText) {
-        const anchors = [...mesText.querySelectorAll<HTMLElement>(BBI_SLOT_SELECTOR)];
+        const anchors = bottom ? bottomAnchors(mesText, tags.length)
+          : [...mesText.querySelectorAll<HTMLElement>(BBI_SLOT_SELECTOR)];
         if (anchors.length !== tags.length) {
           console.warn(
             `[柏宝绘] 楼层 #${messageId} 锚点 ${anchors.length} 个 ≠ 生图 tag ${tags.length} 个,按少者配对`,
@@ -171,6 +175,7 @@ export function hydrateMessage(messageId: number, ctx: STContext): void {
               characters: content.characters,
               size: content.size,
               tag: tags[seq],
+              hydration: ++hydrationRevision,
               messageId,
               seq,
               swipeId,
@@ -194,9 +199,8 @@ export function hydrateMessage(messageId: number, ctx: STContext): void {
   for (const [key, { anchor, vnode }] of desired) {
     const existing = slotRegistry.get(key);
     if (existing && existing.container.host === anchor) {
-      // 同锚点:render 同类型组件 → props patch,不重挂 DOM、不重跑 onMounted。
-      // autoGenerate 标记由 onMounted 消费,但它只出现在「刚写入 tag」的锚点上
-      // (写正文必触发 ST 重渲染、锚点必重建),走不到这条分支。
+      // 同锚点只 patch。底部模式保留宿主，Card 通过 hydration 修订号
+      // 消费本次写入的一次性生成标记，不依赖 onMounted 重跑。
       existing.vnode = vnode;
       render(vnode, existing.container);
     } else {
@@ -205,7 +209,7 @@ export function hydrateMessage(messageId: number, ctx: STContext): void {
       const shadow = ensureShadow(anchor);
       anchor.setAttribute('data-theme', settings.ui.cardTheme || 'st');
       render(vnode, shadow);
-      slotRegistry.set(key, { container: shadow, vnode });
+      slotRegistry.set(key, { container: shadow, vnode, messageId, chatId });
     }
   }
 }
@@ -256,7 +260,7 @@ export function healSlots(): void {
       continue;
     }
 
-    const floor = floorIdOf(host);
+    const floor = floorIdOf(host) ?? (record.chatId === getContext()?.getCurrentChatId() ? record.messageId ?? null : null);
     // 找不到楼层号:该楼整个不在文档里(切聊天/懒渲染卸载),等渲染事件即可。
     // 记录留着不动——hydrateMessage 会在楼层回来时按 desired 集合正常对账。
     if (floor === null) continue;
@@ -281,8 +285,8 @@ const hiddenWarned = new Set<number>();
  * 的人是可见的倒退;而且行内样式一旦钉上就撤不掉了(ST 之后按 extra 重算 class,
  * 却管不到我们写的 style),正是那种「改不了又一直在生效」的暗格。
  *
- * 卡片必须落在 tag 的行内位置(多 tag 楼层按位置分别成图),搬不出 .mes_text——
- * 同一条约束当初也否掉了官方 extra.media 方案。故这一类只能如实报告:
+ * 此处针对行内模式；底部模式的卡片位于 .mes_text 外侧。
+ * 行内模式遇到这一类隐藏只能如实报告:
  * 日志给出楼层号与原因,便于用户反馈时一句话定位,不假装修好了。
  */
 function warnHiddenByHost(host: Element): void {

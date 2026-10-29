@@ -30,7 +30,8 @@ import {
   consumeAutoGenerate,
   markForAutoGenerate,
 } from '@/floor/autoGenerate';
-import { applyMessageText, type ApplyMessageResult } from '@/st/messageEdit';
+import { type ApplyMessageResult } from '@/st/messageEdit';
+import { applyImageMessage, detachedImageTags, hasMessageImageTags, messageImageTags } from '@/st/imageSlots';
 import { getContext, isAiStoryMessage, type STMessage } from '@/st/context';
 import {
   hasImageTagTrace,
@@ -224,7 +225,10 @@ async function runForFloor(floor: number, opts: RunOptions = {}): Promise<void> 
   const slot = opts.slot;
   // 单槽重写的目标:开跑时快照第 seq 条 tag 的原文,写回前用它确认 seq 指的还是同一条
   // (同提示词编辑弹窗的纪律)。正文这会儿已经没这条 tag = 期间被删/换 swipe,直接放弃。
-  const slotRawTag = slot ? parseImageTags(rawSource)[slot.seq] : undefined;
+  const originalTags = messageImageTags(message);
+  const originalBottom = detachedImageTags(message) !== null;
+  const writeBottom = originalBottom || settings.ui.imagePlacement === 'bottom';
+  const slotRawTag = slot ? originalTags[slot.seq] : undefined;
   if (slot && slotRawTag === undefined) {
     abort(
       floor,
@@ -237,7 +241,7 @@ async function runForFloor(floor: number, opts: RunOptions = {}): Promise<void> 
   // 探测口径与按钮层同源(imageTagRegex.hasImageTagTrace):两侧漂移过一次——
   // 按钮只认开标签、这里认开也认闭,只剩 `</bbi_image>` 的楼就卡成「点了没反应」。
   // 单槽重写以「本楼已有 tag」为前提,不受此闸门拦截。
-  if (hasImageTagTrace(rawSource) && !opts.replace && !slot) {
+  if (hasMessageImageTags(message) && !opts.replace && !slot) {
     abort(
       floor,
       'already-has-image-tag',
@@ -318,7 +322,7 @@ async function runForFloor(floor: number, opts: RunOptions = {}): Promise<void> 
       memory,
       preparedTarget,
       anchors.text,
-      slot ? buildSlotTaskNote(rawSource, slot.seq) : '',
+      slot ? buildSlotTaskNote(originalTags.join('\n'), slot.seq) : '',
       profile,
     );
     const channel = getTagGenChannel();
@@ -507,21 +511,31 @@ async function runForFloor(floor: number, opts: RunOptions = {}): Promise<void> 
     // 正文在 buildNext 里基于「落盘那一刻的真实正文」现算:分析期间别的插件对正文的修改
     // (翻译/润色/追加状态栏/改写句子)全部保留,tag 按叙事行重新定位后照常注入。
     let rebaseNote = '';
-    const result = await applyMessageText(
+    const result = await applyImageMessage(
       floor,
-      currentText => {
+      (currentText, currentMessage) => {
+        // 存储方式或槽位在请求期间变更时，不把迟到结果写进新槽位。
+        if ((detachedImageTags(currentMessage) !== null) !== originalBottom) return null;
+        if (JSON.stringify(messageImageTags(currentMessage, currentText)) !== JSON.stringify(originalTags)) return null;
         // 单槽重写:只替换第 seq 条 tag,正文与其它 tag 一字不动,也不需要位置重定位。
         // 模型返回的 position 在这里刻意不参与——画面钉死在原位,它只负责重写内容。
         // 开跑时快照的原文对不上 = 期间被用户/别的流程改过,放弃覆盖(同提示词编辑弹窗)。
         if (slot) {
-          if (parseImageTags(currentText)[slot.seq] !== slotRawTag) return null;
-          return replaceImageTagAt(currentText, slot.seq, serializeImageTag(plan.images[0]));
+          const nextTag = serializeImageTag(plan.images[0]);
+          if (originalBottom) {
+            const tags = [...originalTags];
+            tags[slot.seq] = nextTag;
+            return { text: currentText, tags };
+          }
+          const text = replaceImageTagAt(currentText, slot.seq, nextTag);
+          return text === null ? null : { text };
         }
         // replace 路径同样以当前正文为基底剔除旧 tag,不能用旧快照
         const base = opts.replace ? stripImageTags(currentText) : currentText;
-        if (!plan.images.length) return base;
+        const extra = [{ key: BBI_CHAR_EXTRA_KEY, value: makeCharTagFloorDelta(floorOps, swipeId ?? 0) }];
+        if (!plan.images.length) return { text: base, tags: originalBottom ? [] : undefined, extra };
         // 请求期间用户/别的插件已经贴过 tag:再注入就是重复,交回 build-failed 走放弃分支
-        if (!opts.replace && hasImageTagTrace(currentText)) return null;
+        if (!opts.replace && hasMessageImageTags(currentMessage, currentText)) return null;
         const rebased = rebaseImagePositions(
           base,
           preparedTarget.segments,
@@ -530,18 +544,17 @@ async function runForFloor(floor: number, opts: RunOptions = {}): Promise<void> 
         );
         if (!rebased) return null;
         rebaseNote = describeRebase(rebased.report);
-        return injectImageTags(base, rebased.images);
+        if (writeBottom) {
+          // 与原行内序号一致，不能按模型数组顺序或请求完成时间重排历史槽位。
+          const ordered = rebased.images.map((image, index) => ({ image, index }))
+            .sort((a, b) => a.image.sourceLine - b.image.sourceLine || a.index - b.index);
+          return { text: base, tags: ordered.map(({ image }) => serializeImageTag(image)), extra };
+        }
+        return { text: injectImageTags(base, rebased.images), extra };
       },
       chatId,
       swipeId,
       message,
-      // 单槽不写法:本楼角色增量与其它槽位图片都不归它管,不传 extraUpdate 即保持原样。
-      slot
-        ? undefined
-        : {
-            key: BBI_CHAR_EXTRA_KEY,
-            value: makeCharTagFloorDelta(floorOps, swipeId ?? 0),
-          },
     );
     if (result === 'saved') {
       if (slot) {

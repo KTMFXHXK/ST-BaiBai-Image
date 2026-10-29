@@ -68,6 +68,8 @@ const props = defineProps<{
   size: Orientation;
   /** tag 原文(含 <bbi_image> 壳):生成提交与 promptHash 的输入。 */
   tag: string;
+  /** 每次水合都检查一次性生成标记；底部宿主不会随正文刷新而重建。 */
+  hydration?: number;
   messageId: number;
   seq: number;
   swipeId: number;
@@ -444,7 +446,7 @@ function downloadCurrent(): void {
 // props patch 而非重挂,onMounted 不会再跑;tag 一变必须立刻作废旧提示词的任务。
 watch(hash, current => reconcileGen(key.value, current), { immediate: true });
 
-onMounted(() => {
+function consumeGenerationRequest(): void {
   // 「写入 tag 后自动生成图片」:本槽位带着标记水合挂载 → 消费标记并直接开始生成。
   // **标记一律先消费再判断**:留着它会在日后同槽位重现(比如用户删掉旧图)时被新卡片
   // 误认领,凭空开跑一次用户没点过的生成。判定本身抽成 shouldAutoGenerate 纯函数
@@ -456,7 +458,9 @@ onMounted(() => {
   if (!shouldAutoGenerate(mode, phase.value)) return;
   if (!configured.value) return;
   void generate();
-});
+}
+onMounted(consumeGenerationRequest);
+watch(() => props.hydration, consumeGenerationRequest, { flush: 'post' });
 </script>
 
 <template>

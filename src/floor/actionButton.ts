@@ -4,6 +4,8 @@ import { ensureChatObserver, onChatMutation } from '@/floor/chatObserver';
 import { isCurrentChatExcluded, settings } from '@/state/settings';
 import { getContext, isAiStoryMessage } from '@/st/context';
 import { hasImageTagTrace } from '@/st/imageTagRegex';
+import { detachedImageTags, hasMessageImageTags } from '@/st/imageSlots';
+import { moveToBottom } from '@/floor/moveToBottom';
 
 /**
  * 楼层「生成生图 tag」按钮注入。
@@ -54,7 +56,7 @@ async function onActivate(button: HTMLElement): Promise<void> {
     return;
   }
 
-  const hasTags = hasImageTagTrace(message.mes ?? '');
+  const hasTags = hasMessageImageTags(message);
   if (hasTags) {
     const ok = await confirmDialog({
       title: '重新生成 tag',
@@ -115,6 +117,40 @@ function syncButtons(): void {
     const existing = extra.querySelector<HTMLElement>(`.${BUTTON_CLASS}`);
     if (wanted && !existing) extra.appendChild(createButton());
     else if (!wanted && existing && existing.dataset.running !== '1') existing.remove();
+    const move = extra.querySelector<HTMLElement>('.bbi-move-bottom');
+    const needsMove = wanted && settings.enabled && detachedImageTags(chat[floor]) === null && hasImageTagTrace(chat[floor].mes);
+    if (needsMove && !move) {
+      const button = document.createElement('div');
+      button.className = 'mes_button fa-solid fa-angles-down bbi-move-bottom';
+      button.title = '柏宝绘：将本条插图移至底部（保留提示词和历史图片）';
+      button.setAttribute('aria-label', '插图移至底部');
+      button.setAttribute('role', 'button');
+      button.tabIndex = 0;
+      const activate = async () => {
+        if (button.dataset.running === '1') return;
+        const ctx = getContext();
+        const message = ctx?.chat[floor];
+        const chatId = ctx?.getCurrentChatId();
+        if (!message || !chatId) return;
+        const text = message.mes;
+        const swipeId = Array.isArray(message.swipes) ? message.swipe_id ?? 0 : null;
+        button.dataset.running = '1';
+        try {
+          const ok = await confirmDialog({ title: '插图移至底部', text: '将本条回复的生图标签移出正文。提示词和历史图片保留，不会重新生图；原正文会保存为消息附加备份。', confirmText: '移至底部' });
+          if (!ok) return;
+          const result = await moveToBottom(floor, text, chatId, swipeId, message);
+          if (result === 'saved') toastr.success('本条插图已移至底部', '柏宝绘');
+          else toastr.warning('消息已变化，或含有无法安全转换的标签，本次未修改', '柏宝绘');
+        } catch (error) {
+          toastr.error(error instanceof Error ? error.message : String(error), '柏宝绘');
+        } finally { button.dataset.running = ''; }
+      };
+      button.addEventListener('click', () => void activate());
+      button.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void activate(); }
+      });
+      extra.appendChild(button);
+    } else if (!needsMove && move && move.dataset.running !== '1') move.remove();
   }
 }
 

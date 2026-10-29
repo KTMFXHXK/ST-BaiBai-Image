@@ -18,6 +18,7 @@ import {
 } from '@/autoTag/context';
 import type { BookMemoryContext } from '@/autoTag/bookMemory';
 import { isAiStoryMessage, isStoryMessage, type STContext } from '@/st/context';
+import { detachedImageTags } from '@/st/imageSlots';
 import type { AutoTagSettings } from '@/state/settings';
 import {
   activeComfyPreset,
@@ -167,13 +168,14 @@ export async function buildAutoTagMessages(
     prepareTargetText(target.mes, settings.excludes.customStripTags);
   const previous = recentFloors(context, targetFloor, options.contextMessages)
     .filter(floor => floor !== targetFloor)
-    .map(
-      floor =>
-        `--- 上下文｜${roleLabel(context, floor)} ---\n${cleanHistoryText(
-          context.chat[floor].mes,
-          settings.excludes.customStripTags,
-        )}`,
-    )
+    .map(floor => {
+      const message = context.chat[floor];
+      const text = cleanHistoryText(message.mes, settings.excludes.customStripTags);
+      const tags = detachedImageTags(message);
+      // 只在副 API 请求中还原历史画面线索，不将标签写回正文或主聊天提示词。
+      const history = tags?.length ? `${text}\n${tags.join('\n')}` : text;
+      return `--- 上下文｜${roleLabel(context, floor)} ---\n${history}`;
+    })
     .join('\n\n');
   const memoryText = memory ? memory.text : '角色参考：柏宝书本次未提供。';
 

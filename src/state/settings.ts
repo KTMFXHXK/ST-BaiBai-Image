@@ -348,6 +348,8 @@ export interface UiPrefs {
    * 只是「默认」——卡片上手动展开/折叠过的槽位以手动状态为准(会话内,见 floor/collapseState.ts)。
    */
   autoCollapseImages: boolean;
+  /** 新插图默认位置；已有底部槽位不因设置切换而迁回正文。 */
+  imagePlacement: 'inline' | 'bottom';
   /**
    * 楼层图片显示大小(合法值见 IMAGE_DISPLAY_SIZES)。只管聊天里显示多大,
    * 与出图分辨率、横竖方向无关,生成的文件一字节不变。
@@ -1185,6 +1187,7 @@ function defaults(): ImageSettings {
       orbSize: 48,
       cardTheme: 'st',
       autoCollapseImages: false,
+      imagePlacement: 'inline',
       imageDisplaySize: 'medium',
     },
     // 出图后端默认 ComfyUI(当前唯一实现的出图后端);webui 渠道已隐藏,不再作为可选值
@@ -1765,6 +1768,7 @@ function normalize(raw: unknown): ImageSettings {
         ? Math.min(80, Math.max(32, Math.round(ru.orbSize)))
         : d.ui.orbSize,
     cardTheme: typeof ru.cardTheme === 'string' ? ru.cardTheme : d.ui.cardTheme,
+    imagePlacement: ru.imagePlacement === 'bottom' ? 'bottom' : 'inline',
     autoCollapseImages:
       typeof ru.autoCollapseImages === 'boolean' ? ru.autoCollapseImages : d.ui.autoCollapseImages,
     // 老配置缺字段 → 默认档(中)。不为「保持铺满」做迁移:铺满正是要修的问题,想要回去下拉里选

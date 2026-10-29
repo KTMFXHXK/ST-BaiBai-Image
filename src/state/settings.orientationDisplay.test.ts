@@ -35,6 +35,10 @@ beforeEach(() => {
 });
 
 describe('画幅锁 / NAI 自然语言 / 显示大小 · 读取兜底', () => {
+  it.each([['bottom', 'bottom'], ['inline', 'inline'], ['bad', 'inline'], [null, 'inline']])('图片插入位置 %s → %s', async (input, expected) => {
+    const { settings } = await hydrateWith({ ui: { imagePlacement: input } });
+    expect(settings.ui.imagePlacement).toBe(expected);
+  });
   it('老配置缺这些字段 → 不锁方向、NAI 照写自然语言、显示大小「中」', async () => {
     const { settings } = await hydrateWith({
       nai: { model: 'nai-diffusion-4-5-full' },

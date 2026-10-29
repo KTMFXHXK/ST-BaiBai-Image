@@ -58,6 +58,15 @@ function context(): STContext {
 }
 
 describe('auto tag prompt', () => {
+  it('底部槽位只在副 API 历史中还原连续性线索，不修改消息正文', async () => {
+    const ctx = context();
+    const prior = { ...ctx.chat[1], mes: '<bbs_start>旧正文</bbs_start><bbs_end>结束</bbs_end>', extra: { bbiImageSlots: { v: 1, swipes: { 0: ['<bbi_image>unique previous scene</bbi_image>'] } } } };
+    ctx.chat.splice(1, 0, prior);
+    const original = JSON.stringify(ctx.chat);
+    const messages = await buildAutoTagMessages(ctx, 2, { ...settings.autoTag, contextMessages: 2 }, null);
+    expect(messages.map(message => message.content).join('\n')).toContain('<bbi_image>unique previous scene</bbi_image>');
+    expect(JSON.stringify(ctx.chat)).toBe(original);
+  });
   it('marks only clean target paragraphs without pulling user messages before the earliest selected AI floor', async () => {
     const options: AutoTagSettings = {
       enabled: true,

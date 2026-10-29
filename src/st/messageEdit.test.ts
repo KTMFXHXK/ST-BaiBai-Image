@@ -62,7 +62,7 @@ describe('safe message editing', () => {
     const buildNext = vi.fn((text: string) => `${text}\n<bbi_image>scene</bbi_image>`);
     await expect(applyMessageText(0, buildNext, 'chat-a', 0)).resolves.toBe('saved');
     // 基底是落盘那一刻的正文,不是请求开始时的快照
-    expect(buildNext).toHaveBeenCalledWith('别的插件刚改过的正文');
+    expect(buildNext).toHaveBeenCalledWith('别的插件刚改过的正文', message);
     expect(message.mes).toBe('别的插件刚改过的正文\n<bbi_image>scene</bbi_image>');
     expect(saveChat).toHaveBeenCalledOnce();
   });

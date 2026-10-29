@@ -16,6 +16,7 @@ import {
   type ImageTagContent,
 } from '@/st/imageTagRegex';
 import { applyMessageText, type ApplyMessageResult } from '@/st/messageEdit';
+import { applyImageMessage, detachedImageTags, messageImageTags } from '@/st/imageSlots';
 
 /**
  * 命令式打开「编辑提示词」弹窗(供楼层卡片调用)。
@@ -25,11 +26,8 @@ import { applyMessageText, type ApplyMessageResult } from '@/st/messageEdit';
  * 特意**不**挂进卡片自己的 shadow root:弹窗是 fixed 全屏层,而卡片活在 .mes_text 内部,
  * 那里的层叠上下文与 overflow 会把它裁掉(灯箱同理,见 lightbox.ts)。
  *
- * 【提示词的真源是正文】
- * tag 原文存在 message.mes 里,不在 extra、不在 store。所以「编辑提示词」本质是一次
- * 正文写回:序列化新 tag → 原位替换第 seq 条 → applyMessageText(身份 CAS)→
- * 重水合。新 tag 换出新 promptHash,老图自动落进 stale 桶(卡片已有「旧提示词」角标
- * 与提示行),故「应用」不需要任何额外落地逻辑。
+ * 提示词通过 messageImageTags 统一读取：行内模式来自正文，底部模式来自 extra。
+ * 写回走同一身份检查和保存事务。新 tag 换出新 promptHash，老图进入 stale 桶。
  */
 
 // 与 index.ts 的 HOST_ID 一致
@@ -111,14 +109,20 @@ async function writeBack(
 
   let result: Awaited<ReturnType<typeof applyMessageText>>;
   try {
-    result = await applyMessageText(
+    result = await applyImageMessage(
       at.messageId,
-      currentText => {
+      (currentText, currentMessage) => {
         // 弹窗可能开着好几分钟。身份 CAS 只认聊天/楼层/swipe,**刻意不比对正文内容**
         // (那是与别的改正文插件共存的关键),所以「tag 数变了 / 这条 tag 被别人改了」
         // 拦不住,只能在这里按原文自己核对:seq 指的还是不是同一条。
-        if (parseImageTags(currentText)[at.seq] !== at.rawTag) return null;
-        return replaceImageTagAt(currentText, at.seq, nextTag);
+        const tags = messageImageTags(currentMessage, currentText);
+        if (tags[at.seq] !== at.rawTag) return null;
+        if (detachedImageTags(currentMessage) !== null) {
+          tags[at.seq] = nextTag;
+          return { text: currentText, tags };
+        }
+        const text = replaceImageTagAt(currentText, at.seq, nextTag);
+        return text === null ? null : { text };
       },
       at.chatId,
       at.swipeId,
@@ -235,8 +239,11 @@ export function openPromptEditor(options: PromptEditorOptions): void {
    * 返回 true = 确实换了新提示词(据此给一行「已保存」的说明)。
    */
   const refreshFromMessage = (): boolean => {
+    const ctx = getContext();
+    const message = ctx?.chat?.[options.at.messageId];
+    if (ctx?.getCurrentChatId() !== options.at.chatId || !message || (message.swipe_id ?? 0) !== options.at.swipeId) return false;
     const next = nextEditorState(
-      getContext()?.chat?.[options.at.messageId]?.mes,
+      messageImageTags(message).join('\n'),
       options.at.seq,
       rawTag,
     );
